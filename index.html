@@ -1,0 +1,809 @@
+import { useState, useMemo } from "react";
+import { Home, Package, Users, ShoppingCart, TrendingUp, Calendar, Plus, Trash2, X, Menu, Settings, Phone, Lock, Briefcase, BarChart2, LogOut } from "lucide-react";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
+
+// ── Constants ────────────────────────────────────────────────────────────────
+const MARKET_DAYS = { 1:"big", 3:"regular", 5:"regular" };
+const DAY_NAMES = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+const GREEN = "#2d6a4f";
+const TODAY = new Date();
+const TODAY_ISO = TODAY.toISOString().split("T")[0];
+const TODAY_DAY = TODAY.getDay();
+const MARKET_TYPE = MARKET_DAYS[TODAY_DAY];
+
+// ── Sample Data ──────────────────────────────────────────────────────────────
+const INIT_INVENTORY = [
+  { id:1, name:"Tomato",  cat:"Vegetable", qty:500, unit:"kg",    buy:20, sell:30 },
+  { id:2, name:"Mango",   cat:"Fruit",     qty:200, unit:"kg",    buy:50, sell:70 },
+  { id:3, name:"Onion",   cat:"Vegetable", qty:300, unit:"kg",    buy:15, sell:22 },
+  { id:4, name:"Banana",  cat:"Fruit",     qty:150, unit:"dozen", buy:25, sell:40 },
+  { id:5, name:"Potato",  cat:"Vegetable", qty:400, unit:"kg",    buy:18, sell:28 },
+];
+const INIT_FARMERS = [
+  { id:1, name:"Ramesh Patil",  product:"Tomato", qty:200, unit:"kg", rate:20, total:4000, date:"2026-06-15" },
+  { id:2, name:"Suresh Kumar",  product:"Mango",  qty:80,  unit:"kg", rate:50, total:4000, date:"2026-06-13" },
+  { id:3, name:"Vijay More",    product:"Onion",  qty:150, unit:"kg", rate:15, total:2250, date:"2026-06-11" },
+  { id:4, name:"Ganesh Jadhav", product:"Potato", qty:200, unit:"kg", rate:18, total:3600, date:"2026-06-09" },
+];
+const INIT_RETAILERS = [
+  { id:1, name:"City Mart",     product:"Tomato", qty:150, unit:"kg", rate:30, total:4500, date:"2026-06-15" },
+  { id:2, name:"Fresh Store",   product:"Mango",  qty:60,  unit:"kg", rate:70, total:4200, date:"2026-06-13" },
+  { id:3, name:"Green Bazaar",  product:"Onion",  qty:100, unit:"kg", rate:22, total:2200, date:"2026-06-11" },
+  { id:4, name:"Metro Veggies", product:"Potato", qty:180, unit:"kg", rate:28, total:5040, date:"2026-06-09" },
+];
+const INIT_WORKERS = [
+  { id:1, name:"Sunil Pawar", role:"Helper", dailyWage:500 },
+  { id:2, name:"Raju Shinde", role:"Loader", dailyWage:450 },
+];
+const INIT_ATTENDANCE = [
+  { id:1, workerId:1, date:"2026-06-15", present:true },
+  { id:2, workerId:2, date:"2026-06-15", present:true },
+  { id:3, workerId:1, date:"2026-06-13", present:true },
+  { id:4, workerId:2, date:"2026-06-13", present:false },
+  { id:5, workerId:1, date:"2026-06-11", present:true },
+  { id:6, workerId:2, date:"2026-06-11", present:true },
+  { id:7, workerId:1, date:"2026-06-09", present:true },
+  { id:8, workerId:2, date:"2026-06-09", present:true },
+];
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function getWeekStart(ds) {
+  const d = new Date(ds + "T00:00:00");
+  const diff = d.getDay() === 0 ? -6 : 1 - d.getDay();
+  const mon = new Date(d); mon.setDate(d.getDate() + diff);
+  return mon.toISOString().split("T")[0];
+}
+function fmtShort(ds) {
+  return new Date(ds + "T00:00:00").toLocaleDateString("en-IN", { day:"numeric", month:"short" });
+}
+
+// ── Shared UI ────────────────────────────────────────────────────────────────
+function Card({ children, className }) {
+  return <div className={"bg-white rounded-xl shadow-sm border border-gray-100 p-5 " + (className || "")}>{children}</div>;
+}
+function Badge({ label, color }) {
+  const m = { green:"bg-green-100 text-green-800", red:"bg-red-100 text-red-800", yellow:"bg-yellow-100 text-yellow-800", blue:"bg-blue-100 text-blue-800", purple:"bg-purple-100 text-purple-800" };
+  return <span className={"text-xs font-semibold px-2 py-1 rounded-full " + (m[color] || "bg-gray-100 text-gray-700")}>{label}</span>;
+}
+function FI({ label, type, placeholder, value, onChange, onKeyDown }) {
+  return (
+    <div>
+      <label className="block text-xs font-semibold text-gray-600 mb-1">{label}</label>
+      <input type={type || "text"} placeholder={placeholder} value={value} onChange={onChange} onKeyDown={onKeyDown}
+        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400" />
+    </div>
+  );
+}
+function FS({ label, options, value, onChange }) {
+  return (
+    <div>
+      <label className="block text-xs font-semibold text-gray-600 mb-1">{label}</label>
+      <select value={value} onChange={onChange}
+        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400">
+        {options.map(o => <option key={o} value={o}>{o}</option>)}
+      </select>
+    </div>
+  );
+}
+function Modal({ title, onClose, children }) {
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-40 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-screen overflow-y-auto">
+        <div className="flex items-center justify-between p-5 border-b sticky top-0 bg-white z-10">
+          <h3 className="font-bold text-gray-800">{title}</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-700"><X size={20} /></button>
+        </div>
+        <div className="p-5 space-y-3">{children}</div>
+      </div>
+    </div>
+  );
+}
+function GB({ children, onClick, cls }) {
+  return (
+    <button onClick={onClick} className={"flex items-center gap-2 text-sm font-semibold text-white px-4 py-2 rounded-lg " + (cls || "")} style={{ background: GREEN }}>
+      {children}
+    </button>
+  );
+}
+
+// ── Login ────────────────────────────────────────────────────────────────────
+function LoginScreen({ password, onLogin, bizName }) {
+  const [pass, setPass] = useState("");
+  const [err, setErr]   = useState(false);
+  function doLogin() {
+    if (pass === password) { onLogin(); }
+    else { setErr(true); setTimeout(() => setErr(false), 2500); }
+  }
+  return (
+    <div className="min-h-screen flex items-center justify-center p-4" style={{ background:"#edf7f0", fontFamily:"Inter,system-ui" }}>
+      <div className="w-full max-w-sm">
+        <div className="text-center mb-8">
+          <div className="text-6xl mb-3">🥬</div>
+          <h1 className="text-2xl font-bold text-gray-800">{bizName}</h1>
+          <p className="text-sm text-gray-500 mt-1">Wholesale Management System</p>
+        </div>
+        <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-7 space-y-4">
+          <div className="flex items-center gap-2 mb-1">
+            <Lock size={17} style={{ color: GREEN }} />
+            <span className="font-bold text-gray-700">Owner Login</span>
+          </div>
+          <FI label="Password" type="password" placeholder="Enter owner password" value={pass}
+            onChange={e => setPass(e.target.value)} onKeyDown={e => e.key === "Enter" && doLogin()} />
+          {err && <p className="text-red-500 text-xs font-medium">Incorrect password. Please try again.</p>}
+          <button onClick={doLogin} className="w-full text-white font-bold py-3 rounded-xl text-sm" style={{ background: GREEN }}>
+            Login to Dashboard
+          </button>
+          <p className="text-xs text-center text-gray-400">Default password: <span className="font-mono font-semibold text-gray-600">more@1234</span></p>
+        </div>
+        <p className="text-center text-xs text-gray-400 mt-5">🔒 Restricted — Authorized personnel only</p>
+      </div>
+    </div>
+  );
+}
+
+// ── Dashboard ────────────────────────────────────────────────────────────────
+function Dashboard({ inventory, farmers, retailers, workers, attendance, ownerName, ownerPhone, bizName }) {
+  const todayRev    = retailers.filter(r => r.date === TODAY_ISO).reduce((s, r) => s + r.total, 0);
+  const todayCost   = farmers.filter(f => f.date === TODAY_ISO).reduce((s, f) => s + f.total, 0);
+  const todaySalary = workers.reduce((s, w) => s + (attendance.find(a => a.workerId === w.id && a.date === TODAY_ISO && a.present) ? w.dailyWage : 0), 0);
+  const todayNet    = todayRev - todayCost - todaySalary;
+  const totalStock  = inventory.reduce((s, i) => s + i.qty, 0);
+  let bCls = "bg-gray-50 border-gray-200", bIcon = "🔒", bLbl = "No Market Today";
+  if (MARKET_TYPE === "big")     { bCls = "bg-red-50 border-red-200";       bIcon = "🔴"; bLbl = "BIG MARKET DAY! Busy Day 🔥"; }
+  if (MARKET_TYPE === "regular") { bCls = "bg-yellow-50 border-yellow-200"; bIcon = "🟡"; bLbl = "Regular Market Day"; }
+  return (
+    <div className="space-y-5">
+      <div className="rounded-xl p-4 flex items-center justify-between border bg-green-50 border-green-200">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm flex-shrink-0" style={{ background: GREEN }}>
+            {ownerName.split(" ").map(w => w[0]).join("").slice(0,2).toUpperCase()}
+          </div>
+          <div>
+            <p className="font-bold text-gray-800 text-sm">{ownerName}</p>
+            <p className="text-xs text-gray-500">Owner, {bizName}</p>
+          </div>
+        </div>
+        <a href={"tel:" + ownerPhone} className="flex items-center gap-2 text-xs font-semibold px-3 py-2 rounded-lg text-white" style={{ background: GREEN }}>
+          <Phone size={13} /> {ownerPhone}
+        </a>
+      </div>
+      <div className={"rounded-xl p-4 flex items-center gap-3 border " + bCls}>
+        <span className="text-3xl">{bIcon}</span>
+        <div>
+          <p className="font-bold text-gray-800">{DAY_NAMES[TODAY_DAY]} — {bLbl}</p>
+          <p className="text-sm text-gray-500">{TODAY.toLocaleDateString("en-IN", { dateStyle:"long" })}</p>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        {[
+          { icon:"💰", label:"Today's Net Profit", val:todayNet,    color: todayNet >= 0 ? GREEN : "#e63946" },
+          { icon:"🏪", label:"Today's Revenue",    val:todayRev,    color:"#1d6fa4" },
+          { icon:"🌾", label:"Today's Cost",       val:todayCost,   color:"#f4a261" },
+          { icon:"👷", label:"Today's Salary",     val:todaySalary, color:"#9b59b6" },
+        ].map(s => (
+          <Card key={s.label} className="flex items-center gap-3">
+            <span className="text-2xl">{s.icon}</span>
+            <div>
+              <p className="text-xs text-gray-500">{s.label}</p>
+              <p className="text-xl font-bold" style={{ color: s.color }}>Rs.{s.val.toLocaleString()}</p>
+            </div>
+          </Card>
+        ))}
+      </div>
+      <Card className="flex items-center gap-3">
+        <span className="text-2xl">📦</span>
+        <div>
+          <p className="text-xs text-gray-500">Total Stock</p>
+          <p className="text-xl font-bold" style={{ color:"#7209b7" }}>{totalStock.toLocaleString()} units across {inventory.length} products</p>
+        </div>
+      </Card>
+      {[
+        { title:"🌾 Recent Farmer Deals", data:[...farmers].reverse().slice(0,3), cls:"text-red-600", sign:"-" },
+        { title:"🏪 Recent Retailer Deals", data:[...retailers].reverse().slice(0,3), cls:"text-green-600", sign:"+" },
+      ].map(({ title, data, cls, sign }) => (
+        <Card key={title}>
+          <h3 className="font-bold text-gray-700 mb-3 text-sm">{title}</h3>
+          {data.length === 0 ? <p className="text-sm text-gray-400">No deals yet.</p> : (
+            <table className="w-full text-sm">
+              <thead><tr className="text-gray-400 text-xs">
+                <th className="text-left pb-2">Name</th><th className="text-left pb-2">Product</th><th className="text-right pb-2">Amount</th>
+              </tr></thead>
+              <tbody>
+                {data.map(d => (
+                  <tr key={d.id} className="border-t border-gray-50">
+                    <td className="py-2 font-medium text-gray-800">{d.name}</td>
+                    <td className="py-2 text-gray-500 text-xs">{d.product} {d.qty}{d.unit}</td>
+                    <td className={"py-2 text-right font-bold " + cls}>{sign}Rs.{d.total.toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+// ── Inventory ────────────────────────────────────────────────────────────────
+function InventoryPage({ inventory, setInventory }) {
+  const [show, setShow] = useState(false);
+  const [iN, setIN] = useState(""); const [iC, setIC] = useState("Vegetable");
+  const [iQ, setIQ] = useState(""); const [iU, setIU] = useState("kg");
+  const [iB, setIB] = useState(""); const [iS, setIS] = useState("");
+  function add() {
+    if (!iN||!iQ||!iB||!iS) return;
+    setInventory(p => [...p, { id:Date.now(), name:iN, cat:iC, qty:+iQ, unit:iU, buy:+iB, sell:+iS }]);
+    setShow(false); setIN(""); setIC("Vegetable"); setIQ(""); setIU("kg"); setIB(""); setIS("");
+  }
+  function sb(q) { return q<50?{label:"Low",color:"red"}:q<200?{label:"Medium",color:"yellow"}:{label:"High",color:"green"}; }
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-bold text-gray-800">📦 Inventory</h2>
+        <GB onClick={() => setShow(true)}><Plus size={15}/> Add Product</GB>
+      </div>
+      <Card className="overflow-x-auto p-0">
+        <table className="w-full text-sm">
+          <thead><tr className="text-gray-400 text-xs bg-gray-50">
+            <th className="text-left p-4">Product</th><th className="text-left p-4">Category</th>
+            <th className="text-right p-4">Qty</th><th className="text-right p-4">Buy</th>
+            <th className="text-right p-4">Sell</th><th className="text-right p-4">Margin</th>
+            <th className="text-right p-4">Stock</th><th className="p-4"></th>
+          </tr></thead>
+          <tbody>
+            {inventory.map(item => {
+              const margin = ((item.sell - item.buy) / item.buy * 100).toFixed(1);
+              const s = sb(item.qty);
+              return (
+                <tr key={item.id} className="border-t border-gray-50 hover:bg-gray-50">
+                  <td className="p-4 font-semibold text-gray-800">{item.name}</td>
+                  <td className="p-4"><Badge label={item.cat} color={item.cat==="Fruit"?"blue":"green"}/></td>
+                  <td className="p-4 text-right">{item.qty} {item.unit}</td>
+                  <td className="p-4 text-right text-gray-600">Rs.{item.buy}</td>
+                  <td className="p-4 text-right text-gray-600">Rs.{item.sell}</td>
+                  <td className="p-4 text-right text-green-600 font-semibold">+{margin}%</td>
+                  <td className="p-4 text-right"><Badge label={s.label} color={s.color}/></td>
+                  <td className="p-4 text-right">
+                    <button onClick={() => setInventory(p => p.filter(i => i.id !== item.id))} className="text-gray-300 hover:text-red-500"><Trash2 size={15}/></button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </Card>
+      {show && (
+        <Modal title="Add Product to Inventory" onClose={() => setShow(false)}>
+          <FI label="Product Name" placeholder="e.g. Tomato" value={iN} onChange={e => setIN(e.target.value)}/>
+          <FS label="Category" options={["Vegetable","Fruit"]} value={iC} onChange={e => setIC(e.target.value)}/>
+          <div className="grid grid-cols-2 gap-3">
+            <FI label="Quantity" type="number" value={iQ} onChange={e => setIQ(e.target.value)}/>
+            <FS label="Unit" options={["kg","dozen","box","crate","piece"]} value={iU} onChange={e => setIU(e.target.value)}/>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <FI label="Buy Price (Rs.)" type="number" value={iB} onChange={e => setIB(e.target.value)}/>
+            <FI label="Sell Price (Rs.)" type="number" value={iS} onChange={e => setIS(e.target.value)}/>
+          </div>
+          <button onClick={add} className="w-full text-white font-semibold py-2 rounded-lg mt-1" style={{ background:GREEN }}>Add Product</button>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ── Deal Page ────────────────────────────────────────────────────────────────
+function DealPage({ type, deals, setDeals, inventory }) {
+  const isFarmer = type === "farmer";
+  const [show, setShow] = useState(false);
+  const [dN, setDN] = useState(""); const [dP, setDP] = useState(inventory[0] ? inventory[0].name : "");
+  const [dQ, setDQ] = useState(""); const [dU, setDU] = useState("kg");
+  const [dR, setDR] = useState(""); const [dD, setDD] = useState(TODAY_ISO);
+  function add() {
+    if (!dN||!dP||!dQ||!dR) return;
+    setDeals(prev => [...prev, { id:Date.now(), name:dN, product:dP, qty:+dQ, unit:dU, rate:+dR, total:+dQ*+dR, date:dD }]);
+    setShow(false); setDN(""); setDQ(""); setDR(""); setDD(TODAY_ISO);
+  }
+  const totAll   = deals.reduce((s, d) => s + d.total, 0);
+  const todayTot = deals.filter(d => d.date === TODAY_ISO).reduce((s, d) => s + d.total, 0);
+  const aCls     = isFarmer ? "text-red-600" : "text-green-600";
+  const pBg      = isFarmer ? "bg-red-50 border-red-100" : "bg-green-50 border-green-100";
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-bold text-gray-800">{isFarmer ? "🌾 Farmer Deals" : "🏪 Retailer Deals"}</h2>
+        <GB onClick={() => setShow(true)}><Plus size={15}/> New Deal</GB>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <Card><p className="text-xs text-gray-500">{isFarmer?"Total Purchases":"Total Revenue"}</p><p className={"text-2xl font-bold " + aCls}>Rs.{totAll.toLocaleString()}</p><p className="text-xs text-gray-400">{deals.length} deals</p></Card>
+        <Card><p className="text-xs text-gray-500">{isFarmer?"Today's Cost":"Today's Revenue"}</p><p className={"text-2xl font-bold " + aCls}>Rs.{todayTot.toLocaleString()}</p><p className="text-xs text-gray-400">{deals.filter(d=>d.date===TODAY_ISO).length} today</p></Card>
+      </div>
+      <Card className="overflow-x-auto p-0">
+        <table className="w-full text-sm">
+          <thead><tr className="text-gray-400 text-xs bg-gray-50">
+            <th className="text-left p-4">{isFarmer?"Farmer":"Retailer"}</th><th className="text-left p-4">Product</th>
+            <th className="text-right p-4">Qty</th><th className="text-right p-4">Rate</th>
+            <th className="text-right p-4">Total</th><th className="text-right p-4">Date</th><th className="p-4"></th>
+          </tr></thead>
+          <tbody>
+            {[...deals].reverse().map(d => (
+              <tr key={d.id} className="border-t border-gray-50 hover:bg-gray-50">
+                <td className="p-4 font-semibold text-gray-800">{d.name}</td>
+                <td className="p-4 text-gray-600">{d.product}</td>
+                <td className="p-4 text-right">{d.qty} {d.unit}</td>
+                <td className="p-4 text-right text-gray-600">{d.rate}</td>
+                <td className={"p-4 text-right font-bold " + aCls}>{isFarmer?"-":"+"}Rs.{d.total.toLocaleString()}</td>
+                <td className="p-4 text-right text-gray-400 text-xs">{d.date}</td>
+                <td className="p-4 text-right"><button onClick={() => setDeals(p => p.filter(x => x.id !== d.id))} className="text-gray-300 hover:text-red-500"><Trash2 size={15}/></button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Card>
+      {show && (
+        <Modal title={isFarmer?"New Farmer Deal":"New Retailer Deal"} onClose={() => setShow(false)}>
+          <FI label={isFarmer?"Farmer Name":"Retailer Name"} placeholder={isFarmer?"e.g. Ramesh Patil":"e.g. City Mart"} value={dN} onChange={e => setDN(e.target.value)}/>
+          <FS label="Product" options={inventory.map(i => i.name)} value={dP} onChange={e => setDP(e.target.value)}/>
+          <div className="grid grid-cols-2 gap-3">
+            <FI label="Quantity" type="number" value={dQ} onChange={e => setDQ(e.target.value)}/>
+            <FS label="Unit" options={["kg","dozen","box","crate","piece"]} value={dU} onChange={e => setDU(e.target.value)}/>
+          </div>
+          <FI label="Rate per Unit (Rs.)" type="number" value={dR} onChange={e => setDR(e.target.value)}/>
+          <FI label="Date" type="date" value={dD} onChange={e => setDD(e.target.value)}/>
+          {dQ && dR && <div className={"border rounded-lg p-3 text-sm " + pBg}>Total: <span className={"font-bold " + aCls}>Rs.{(+dQ * +dR).toLocaleString()}</span></div>}
+          <button onClick={add} className="w-full text-white font-semibold py-2 rounded-lg" style={{ background:GREEN }}>Add Deal</button>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ── Workers & Salary ─────────────────────────────────────────────────────────
+function WorkersPage({ workers, setWorkers, attendance, setAttendance }) {
+  const [showAdd, setShowAdd] = useState(false);
+  const [wN, setWN] = useState(""); const [wR, setWR] = useState("Helper"); const [wW, setWW] = useState("");
+  const [markDate, setMarkDate] = useState(TODAY_ISO);
+
+  function addWorker() {
+    if (!wN || !wW) return;
+    setWorkers(p => [...p, { id:Date.now(), name:wN, role:wR, dailyWage:+wW }]);
+    setShowAdd(false); setWN(""); setWR("Helper"); setWW("");
+  }
+  function isPresent(wId) { return attendance.some(a => a.workerId === wId && a.date === markDate && a.present); }
+  function toggle(wId) {
+    const ex = attendance.find(a => a.workerId === wId && a.date === markDate);
+    if (ex) setAttendance(p => p.map(a => a.workerId===wId&&a.date===markDate ? {...a, present:!a.present} : a));
+    else    setAttendance(p => [...p, { id:Date.now(), workerId:wId, date:markDate, present:true }]);
+  }
+  function getDaysWorked(wId) { return attendance.filter(a => a.workerId === wId && a.present).length; }
+  function getTotalPaid(wId, wage) { return getDaysWorked(wId) * wage; }
+
+  const todaySal = workers.reduce((s, w) => s + (isPresent(w.id) ? w.dailyWage : 0), 0);
+  const totalPaid = workers.reduce((s, w) => s + getTotalPaid(w.id, w.dailyWage), 0);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-bold text-gray-800">👷 Workers & Salary</h2>
+        <GB onClick={() => setShowAdd(true)}><Plus size={15}/> Add Worker</GB>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <Card><p className="text-xs text-gray-500">Today's Salary</p><p className="text-2xl font-bold text-purple-600">Rs.{todaySal.toLocaleString()}</p><p className="text-xs text-gray-400">{workers.filter(w=>isPresent(w.id)).length}/{workers.length} present</p></Card>
+        <Card><p className="text-xs text-gray-500">Total Salary Paid</p><p className="text-2xl font-bold text-red-600">Rs.{totalPaid.toLocaleString()}</p><p className="text-xs text-gray-400">All time</p></Card>
+      </div>
+
+      {/* Worker Cards */}
+      <div className="space-y-3">
+        {workers.map(w => (
+          <Card key={w.id}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm" style={{ background:GREEN }}>
+                  {w.name.split(" ").map(n => n[0]).join("").slice(0,2).toUpperCase()}
+                </div>
+                <div>
+                  <p className="font-bold text-gray-800">{w.name}</p>
+                  <p className="text-xs text-gray-500">{w.role} — Rs.{w.dailyWage}/day</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="text-right">
+                  <p className="text-sm font-bold text-gray-700">Rs.{getTotalPaid(w.id, w.dailyWage).toLocaleString()}</p>
+                  <p className="text-xs text-gray-400">{getDaysWorked(w.id)} days worked</p>
+                </div>
+                <button onClick={() => { setWorkers(p => p.filter(x => x.id !== w.id)); setAttendance(p => p.filter(a => a.workerId !== w.id)); }} className="text-gray-300 hover:text-red-500"><Trash2 size={15}/></button>
+              </div>
+            </div>
+          </Card>
+        ))}
+      </div>
+
+      {/* Attendance Marking */}
+      <Card>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-bold text-gray-700 text-sm">📋 Mark Attendance</h3>
+          <input type="date" value={markDate} onChange={e => setMarkDate(e.target.value)}
+            className="border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-green-400"/>
+        </div>
+        <div className="space-y-2">
+          {workers.map(w => {
+            const present = isPresent(w.id);
+            return (
+              <div key={w.id} className={"flex items-center justify-between p-3 rounded-xl border " + (present ? "bg-green-50 border-green-200" : "bg-gray-50 border-gray-100")}>
+                <div className="flex items-center gap-3">
+                  <div className={"w-3 h-3 rounded-full " + (present ? "bg-green-500" : "bg-gray-300")}></div>
+                  <div>
+                    <p className="text-sm font-semibold text-gray-800">{w.name}</p>
+                    <p className="text-xs text-gray-500">{present ? "Present — Rs." + w.dailyWage : "Absent — Rs.0"}</p>
+                  </div>
+                </div>
+                <button onClick={() => toggle(w.id)}
+                  className={"text-xs font-bold px-3 py-1.5 rounded-lg " + (present ? "bg-red-100 text-red-600 hover:bg-red-200" : "bg-green-100 text-green-700 hover:bg-green-200")}>
+                  {present ? "Mark Absent" : "Mark Present"}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+
+      {/* Attendance History */}
+      <Card className="p-0">
+        <div className="p-4 border-b border-gray-50"><h3 className="font-bold text-gray-700 text-sm">📅 Attendance History</h3></div>
+        <table className="w-full text-sm">
+          <thead><tr className="text-gray-400 text-xs bg-gray-50">
+            <th className="text-left p-4">Worker</th><th className="text-right p-4">Date</th>
+            <th className="text-right p-4">Status</th><th className="text-right p-4">Salary</th>
+          </tr></thead>
+          <tbody>
+            {[...attendance].reverse().slice(0,15).map(a => {
+              const w = workers.find(x => x.id === a.workerId);
+              if (!w) return null;
+              return (
+                <tr key={a.id} className="border-t border-gray-50">
+                  <td className="p-4 font-medium text-gray-800">{w.name}</td>
+                  <td className="p-4 text-right text-gray-400 text-xs">{a.date}</td>
+                  <td className="p-4 text-right"><Badge label={a.present?"Present":"Absent"} color={a.present?"green":"red"}/></td>
+                  <td className="p-4 text-right font-semibold text-gray-700">{a.present ? "Rs." + w.dailyWage : "—"}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </Card>
+
+      {showAdd && (
+        <Modal title="Add Worker" onClose={() => setShowAdd(false)}>
+          <FI label="Worker Name" placeholder="e.g. Sunil Pawar" value={wN} onChange={e => setWN(e.target.value)}/>
+          <FS label="Role" options={["Helper","Loader","Supervisor","Accountant","Driver","Other"]} value={wR} onChange={e => setWR(e.target.value)}/>
+          <FI label="Daily Wage (Rs.)" type="number" placeholder="e.g. 500" value={wW} onChange={e => setWW(e.target.value)}/>
+          <button onClick={addWorker} className="w-full text-white font-semibold py-2 rounded-lg" style={{ background:GREEN }}>Add Worker</button>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ── Weekly Report ────────────────────────────────────────────────────────────
+function WeeklyReport({ farmers, retailers, workers, attendance }) {
+  const [expanded, setExpanded] = useState(null);
+
+  const weekData = useMemo(() => {
+    const map = {};
+    function ew(wk) { if (!map[wk]) map[wk] = { week:wk, rev:0, cost:0, salary:0, days:{} }; }
+    function ed(wk, date) { if (!map[wk].days[date]) map[wk].days[date] = { date, rev:0, cost:0 }; }
+    farmers.forEach(f => { const wk=getWeekStart(f.date); ew(wk); ed(wk,f.date); map[wk].cost+=f.total; map[wk].days[f.date].cost+=f.total; });
+    retailers.forEach(r => { const wk=getWeekStart(r.date); ew(wk); ed(wk,r.date); map[wk].rev+=r.total; map[wk].days[r.date].rev+=r.total; });
+    attendance.forEach(a => {
+      if (!a.present) return;
+      const w = workers.find(x => x.id === a.workerId);
+      if (!w) return;
+      const wk = getWeekStart(a.date); ew(wk);
+      map[wk].salary += w.dailyWage;
+    });
+    return Object.values(map).sort((a,b) => b.week.localeCompare(a.week)).map(w => {
+      const endDate = new Date(w.week + "T00:00:00"); endDate.setDate(endDate.getDate()+6);
+      return {
+        ...w,
+        gross: w.rev - w.cost,
+        net: w.rev - w.cost - w.salary,
+        label: fmtShort(w.week) + " – " + fmtShort(endDate.toISOString().split("T")[0]),
+        days: Object.values(w.days).sort((a,b)=>a.date.localeCompare(b.date)).map(d=>({...d,profit:d.rev-d.cost})),
+      };
+    });
+  }, [farmers, retailers, workers, attendance]);
+
+  const chartData = [...weekData].reverse().map(w => ({
+    label: fmtShort(w.week),
+    Revenue: w.rev,
+    Cost: w.cost,
+    Salary: w.salary,
+    "Net Profit": w.net,
+  }));
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-xl font-bold text-gray-800">📊 Weekly Report</h2>
+      <Card>
+        <h3 className="font-bold text-gray-700 mb-4 text-sm">Week-wise Overview</h3>
+        <ResponsiveContainer width="100%" height={220}>
+          <BarChart data={chartData}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0"/>
+            <XAxis dataKey="label" tick={{ fontSize:10 }}/>
+            <YAxis tick={{ fontSize:10 }} tickFormatter={v => "Rs." + Math.round(v/1000) + "k"}/>
+            <Tooltip formatter={v => "Rs." + Number(v).toLocaleString()}/>
+            <Legend/>
+            <Bar dataKey="Revenue" fill="#40916c" radius={[4,4,0,0]}/>
+            <Bar dataKey="Cost" fill="#f4a261" radius={[4,4,0,0]}/>
+            <Bar dataKey="Salary" fill="#9b59b6" radius={[4,4,0,0]}/>
+            <Bar dataKey="Net Profit" fill="#1d6fa4" radius={[4,4,0,0]}/>
+          </BarChart>
+        </ResponsiveContainer>
+      </Card>
+
+      {weekData.map(w => (
+        <Card key={w.week}>
+          <div className="flex items-center justify-between cursor-pointer" onClick={() => setExpanded(expanded === w.week ? null : w.week)}>
+            <div>
+              <p className="font-bold text-gray-800 text-sm">Week: {w.label}</p>
+              <div className="flex flex-wrap gap-3 mt-1">
+                <span className="text-xs text-blue-600 font-medium">Rev: Rs.{w.rev.toLocaleString()}</span>
+                <span className="text-xs text-orange-500 font-medium">Cost: Rs.{w.cost.toLocaleString()}</span>
+                <span className="text-xs text-purple-600 font-medium">Salary: Rs.{w.salary.toLocaleString()}</span>
+                <span className={"text-xs font-bold " + (w.net >= 0 ? "text-green-600" : "text-red-600")}>Net: Rs.{w.net.toLocaleString()}</span>
+              </div>
+            </div>
+            <span className="text-gray-400 ml-3 flex-shrink-0">{expanded === w.week ? "▲" : "▼"}</span>
+          </div>
+          {expanded === w.week && (
+            <div className="mt-4 border-t border-gray-100 pt-4">
+              <p className="text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide">Daily Breakdown</p>
+              <table className="w-full text-sm">
+                <thead><tr className="text-gray-400 text-xs">
+                  <th className="text-left pb-2">Date</th><th className="text-right pb-2">Revenue</th>
+                  <th className="text-right pb-2">Cost</th><th className="text-right pb-2">Gross Profit</th>
+                </tr></thead>
+                <tbody>
+                  {w.days.map((d, i) => (
+                    <tr key={i} className="border-t border-gray-50">
+                      <td className="py-2 text-gray-700">{d.date} <span className="text-gray-400 text-xs">({DAY_NAMES[new Date(d.date+"T00:00:00").getDay()]})</span></td>
+                      <td className="py-2 text-right text-blue-600">Rs.{d.rev.toLocaleString()}</td>
+                      <td className="py-2 text-right text-red-500">Rs.{d.cost.toLocaleString()}</td>
+                      <td className={"py-2 text-right font-bold " + (d.profit>=0?"text-green-600":"text-red-600")}>Rs.{d.profit.toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+// ── Market Schedule ──────────────────────────────────────────────────────────
+function SchedulePage() {
+  const sched = [
+    { day:"Monday",    open:true,  type:"big",     desc:"Highest volume. Heavy arrivals & bulk orders. Prepare extra stock!" },
+    { day:"Tuesday",   open:false, type:null,       desc:"Closed. Good for stock review & planning." },
+    { day:"Wednesday", open:true,  type:"regular",  desc:"Mid-week trading. Moderate procurement and sales." },
+    { day:"Thursday",  open:false, type:null,       desc:"Closed. Use for restocking and logistics." },
+    { day:"Friday",    open:true,  type:"regular",  desc:"End-of-week trading. Clear remaining stock." },
+    { day:"Saturday",  open:false, type:null,       desc:"Market closed." },
+    { day:"Sunday",    open:false, type:null,       desc:"Market closed." },
+  ];
+  return (
+    <div className="space-y-5">
+      <h2 className="text-xl font-bold text-gray-800">📅 Market Schedule</h2>
+      <div className="grid grid-cols-7 gap-1">
+        {sched.map(d => {
+          let cls = "bg-gray-50 border-gray-100";
+          if (d.type === "big")     cls = "bg-red-50 border-red-200";
+          if (d.type === "regular") cls = "bg-yellow-50 border-yellow-200";
+          const isToday = DAY_NAMES[TODAY_DAY] === d.day;
+          return (
+            <div key={d.day} className={"rounded-xl p-2 text-center border " + cls + (isToday ? " ring-2 ring-green-500" : "")}>
+              <p className="text-xs font-bold text-gray-600">{d.day.slice(0,3)}</p>
+              <p className="text-xl mt-1">{d.type==="big"?"🔴":d.type==="regular"?"🟡":"⚫"}</p>
+              <p className="text-xs mt-1 text-gray-500">{d.open?"Open":"Closed"}</p>
+            </div>
+          );
+        })}
+      </div>
+      <div className="space-y-3">
+        {sched.filter(d => d.open).map(d => (
+          <Card key={d.day} className={"border-l-4 " + (d.type==="big"?"border-red-400":"border-yellow-400")}>
+            <div className="flex items-start gap-3">
+              <span className="text-2xl">{d.type==="big"?"🔴":"🟡"}</span>
+              <div>
+                <p className="font-bold text-gray-800">{d.day} — {d.type==="big"?"BIG Market Day":"Regular Market Day"}</p>
+                <p className="text-sm text-gray-600 mt-1">{d.desc}</p>
+              </div>
+            </div>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Settings ─────────────────────────────────────────────────────────────────
+function SettingsPage({ ownerName, setOwnerName, ownerPhone, setOwnerPhone, bizName, setBizName, ownerEmail, setOwnerEmail, ownerAddress, setOwnerAddress, password, setPassword }) {
+  const [n, setN] = useState(ownerName); const [p, setP] = useState(ownerPhone);
+  const [b, setB] = useState(bizName);   const [e, setE] = useState(ownerEmail);
+  const [a, setA] = useState(ownerAddress);
+  const [cp, setCp] = useState(""); const [np, setNp] = useState(""); const [rp, setRp] = useState("");
+  const [saved, setSaved] = useState(false); const [pmsg, setPmsg] = useState("");
+
+  function save() {
+    setOwnerName(n); setOwnerPhone(p); setBizName(b); setOwnerEmail(e); setOwnerAddress(a);
+    setSaved(true); setTimeout(() => setSaved(false), 2500);
+  }
+  function changePass() {
+    if (cp !== password) { setPmsg("Current password is incorrect."); return; }
+    if (np.length < 6)   { setPmsg("New password must be at least 6 characters."); return; }
+    if (np !== rp)        { setPmsg("Passwords do not match."); return; }
+    setPassword(np); setCp(""); setNp(""); setRp("");
+    setPmsg("Password changed successfully!");
+    setTimeout(() => setPmsg(""), 3000);
+  }
+
+  return (
+    <div className="space-y-5">
+      <h2 className="text-xl font-bold text-gray-800">⚙️ Settings</h2>
+      <Card className="border-2 border-green-200">
+        <p className="text-xs font-semibold text-gray-400 mb-3 uppercase tracking-wide">Live Preview</p>
+        <div className="flex items-center gap-4">
+          <div className="w-14 h-14 rounded-full flex items-center justify-center text-white font-bold text-lg flex-shrink-0" style={{ background: GREEN }}>
+            {n.split(" ").map(w => w[0]).join("").slice(0,2).toUpperCase() || "?"}
+          </div>
+          <div>
+            <p className="font-bold text-gray-800">{n || "Owner Name"}</p>
+            <p className="text-sm text-gray-500">Owner, {b || "Business"}</p>
+            <p className="text-xs text-gray-400">{p || "Phone"}</p>
+            {e && <p className="text-xs text-gray-400">{e}</p>}
+            {a && <p className="text-xs text-gray-400">{a}</p>}
+          </div>
+        </div>
+      </Card>
+      <Card>
+        <p className="text-sm font-bold text-gray-700 mb-3">👤 Owner Details</p>
+        <div className="space-y-3">
+          <FI label="Owner Full Name" placeholder="e.g. Chandrakant More" value={n} onChange={e2 => setN(e2.target.value)}/>
+          <FI label="Phone Number" placeholder="e.g. 9822773770" value={p} onChange={e2 => setP(e2.target.value)}/>
+          <FI label="Email (optional)" placeholder="e.g. owner@gmail.com" value={e} onChange={e2 => setE(e2.target.value)}/>
+          <FI label="Address (optional)" placeholder="e.g. Pune, Maharashtra" value={a} onChange={e2 => setA(e2.target.value)}/>
+        </div>
+      </Card>
+      <Card>
+        <p className="text-sm font-bold text-gray-700 mb-3">🏢 Business Details</p>
+        <FI label="Business Name" placeholder="e.g. More and Company" value={b} onChange={e2 => setB(e2.target.value)}/>
+      </Card>
+      <button onClick={save} className="w-full text-white font-bold py-3 rounded-xl text-base" style={{ background: GREEN }}>
+        {saved ? "✅ Saved!" : "Save Changes"}
+      </button>
+      <Card>
+        <p className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2"><Lock size={15}/> Change Password</p>
+        <div className="space-y-3">
+          <FI label="Current Password" type="password" value={cp} onChange={e2 => setCp(e2.target.value)}/>
+          <FI label="New Password" type="password" placeholder="Min. 6 characters" value={np} onChange={e2 => setNp(e2.target.value)}/>
+          <FI label="Confirm New Password" type="password" value={rp} onChange={e2 => setRp(e2.target.value)}/>
+          {pmsg && <p className={"text-xs font-medium " + (pmsg.includes("success") ? "text-green-600" : "text-red-500")}>{pmsg}</p>}
+          <button onClick={changePass} className="w-full text-white font-semibold py-2 rounded-lg" style={{ background: GREEN }}>Change Password</button>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// ── Main App ─────────────────────────────────────────────────────────────────
+export default function App() {
+  const [loggedIn, setLoggedIn]   = useState(false);
+  const [password, setPassword]   = useState("more@1234");
+  const [page, setPage]           = useState("dashboard");
+  const [sideOpen, setSideOpen]   = useState(true);
+  const [inventory, setInventory] = useState(INIT_INVENTORY);
+  const [farmers,   setFarmers]   = useState(INIT_FARMERS);
+  const [retailers, setRetailers] = useState(INIT_RETAILERS);
+  const [workers,   setWorkers]   = useState(INIT_WORKERS);
+  const [attendance,setAttendance]= useState(INIT_ATTENDANCE);
+  const [ownerName,    setOwnerName]    = useState("Chandrakant More");
+  const [ownerPhone,   setOwnerPhone]   = useState("9822773770");
+  const [bizName,      setBizName]      = useState("More and Company");
+  const [ownerEmail,   setOwnerEmail]   = useState("");
+  const [ownerAddress, setOwnerAddress] = useState("");
+
+  if (!loggedIn) return <LoginScreen password={password} onLogin={() => setLoggedIn(true)} bizName={bizName}/>;
+
+  const nav = [
+    { id:"dashboard", icon:<Home size={18}/>,         label:"Dashboard" },
+    { id:"inventory", icon:<Package size={18}/>,      label:"Inventory" },
+    { id:"farmers",   icon:<Users size={18}/>,        label:"Farmer Deals" },
+    { id:"retailers", icon:<ShoppingCart size={18}/>, label:"Retailer Deals" },
+    { id:"workers",   icon:<Briefcase size={18}/>,    label:"Workers" },
+    { id:"profit",    icon:<TrendingUp size={18}/>,   label:"Profit Tracker" },
+    { id:"weekly",    icon:<BarChart2 size={18}/>,    label:"Weekly Report" },
+    { id:"schedule",  icon:<Calendar size={18}/>,     label:"Market Schedule" },
+    { id:"settings",  icon:<Settings size={18}/>,     label:"Settings" },
+  ];
+
+  let currentPage = null;
+  if (page==="dashboard") currentPage = <Dashboard inventory={inventory} farmers={farmers} retailers={retailers} workers={workers} attendance={attendance} ownerName={ownerName} ownerPhone={ownerPhone} bizName={bizName}/>;
+  if (page==="inventory") currentPage = <InventoryPage inventory={inventory} setInventory={setInventory}/>;
+  if (page==="farmers")   currentPage = <DealPage type="farmer"   deals={farmers}   setDeals={setFarmers}   inventory={inventory}/>;
+  if (page==="retailers") currentPage = <DealPage type="retailer" deals={retailers} setDeals={setRetailers} inventory={inventory}/>;
+  if (page==="workers")   currentPage = <WorkersPage workers={workers} setWorkers={setWorkers} attendance={attendance} setAttendance={setAttendance}/>;
+  if (page==="profit")    currentPage = <WeeklyReport farmers={farmers} retailers={retailers} workers={workers} attendance={attendance}/>;
+  if (page==="weekly")    currentPage = <WeeklyReport farmers={farmers} retailers={retailers} workers={workers} attendance={attendance}/>;
+  if (page==="schedule")  currentPage = <SchedulePage/>;
+  if (page==="settings")  currentPage = <SettingsPage ownerName={ownerName} setOwnerName={setOwnerName} ownerPhone={ownerPhone} setOwnerPhone={setOwnerPhone} bizName={bizName} setBizName={setBizName} ownerEmail={ownerEmail} setOwnerEmail={setOwnerEmail} ownerAddress={ownerAddress} setOwnerAddress={setOwnerAddress} password={password} setPassword={setPassword}/>;
+
+  const pageTitle = (nav.find(n => n.id === page) || {}).label || "";
+  let mBadge = null;
+  if (MARKET_TYPE==="big")     mBadge = <span className="text-xs font-semibold px-3 py-1 rounded-full bg-red-100 text-red-700">🔴 Big Market Day</span>;
+  if (MARKET_TYPE==="regular") mBadge = <span className="text-xs font-semibold px-3 py-1 rounded-full bg-yellow-100 text-yellow-700">🟡 Market Open</span>;
+  const initials = ownerName.split(" ").map(w => w[0]).join("").slice(0,2).toUpperCase();
+
+  return (
+    <div className="flex h-screen bg-gray-50 overflow-hidden" style={{ fontFamily:"Inter, system-ui, sans-serif" }}>
+      <aside className={"flex flex-col flex-shrink-0 transition-all duration-300 overflow-hidden " + (sideOpen?"w-52":"w-16")} style={{ background:GREEN }}>
+        <div className="p-4 flex items-center gap-3 border-b border-white border-opacity-20 overflow-hidden flex-shrink-0">
+          <span className="text-2xl flex-shrink-0">🥬</span>
+          {sideOpen && <div><p className="text-white font-bold text-sm whitespace-nowrap">{bizName}</p><p className="text-green-200 text-xs whitespace-nowrap">Wholesale Mgmt</p></div>}
+        </div>
+        <nav className="flex-1 p-2 mt-2 space-y-0.5 overflow-y-auto overflow-x-hidden">
+          {nav.map(n => (
+            <button key={n.id} onClick={() => setPage(n.id)}
+              className={"w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition overflow-hidden " +
+                (page===n.id?"bg-white bg-opacity-25 text-white":"text-green-100 hover:bg-white hover:bg-opacity-10 hover:text-white")}>
+              <span className="flex-shrink-0">{n.icon}</span>
+              {sideOpen && <span className="truncate">{n.label}</span>}
+            </button>
+          ))}
+        </nav>
+        <div className="px-3 pb-2 border-t border-white border-opacity-20 pt-3 flex-shrink-0">
+          {sideOpen ? (
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-full bg-white bg-opacity-20 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">{initials}</div>
+              <div className="overflow-hidden">
+                <p className="text-white text-xs font-semibold truncate">{ownerName}</p>
+                <p className="text-green-300 text-xs truncate">{ownerPhone}</p>
+              </div>
+            </div>
+          ) : (
+            <div className="flex justify-center">
+              <div className="w-8 h-8 rounded-full bg-white bg-opacity-20 flex items-center justify-center text-white text-xs font-bold">{initials}</div>
+            </div>
+          )}
+        </div>
+        <div className="flex items-center gap-1 px-2 pb-3 flex-shrink-0">
+          <button onClick={() => setSideOpen(p => !p)} className={"p-2 rounded-lg text-green-200 hover:bg-white hover:bg-opacity-10 hover:text-white flex items-center justify-center " + (sideOpen?"flex-1":"w-full")}>
+            <Menu size={18}/>
+          </button>
+          {sideOpen && (
+            <button onClick={() => setLoggedIn(false)} className="p-2 rounded-lg text-green-200 hover:bg-red-500 hover:text-white flex items-center justify-center" title="Logout">
+              <LogOut size={18}/>
+            </button>
+          )}
+        </div>
+      </aside>
+
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <header className="bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between flex-shrink-0">
+          <div>
+            <h1 className="font-bold text-gray-800 text-lg">{pageTitle}</h1>
+            <p className="text-xs text-gray-400">{bizName} — Owner: {ownerName}</p>
+          </div>
+          <div className="flex items-center gap-3">
+            {mBadge}
+            <div className="flex items-center gap-1 text-xs text-gray-500">
+              <Phone size={12}/><span className="font-medium">{ownerPhone}</span>
+            </div>
+          </div>
+        </header>
+        <main className="flex-1 overflow-y-auto p-6">{currentPage}</main>
+      </div>
+    </div>
+  );
+}
